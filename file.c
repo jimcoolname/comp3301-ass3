@@ -22,6 +22,7 @@
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
+#include <asm/uaccess.h>
 
 /*
  * Called when filp is released. This happens when all file descriptors
@@ -66,24 +67,32 @@ static int ext2_release_file (struct inode * inode, struct file * filp)
 ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
         size_t len, loff_t *ppos)
 {
+    int i;
+    mm_segment_t old_fs;
+    ssize_t retval;
     struct dentry *parent, *second_last;
-    unsigned int buf_len = PAGE_SIZE / 2;
-    char *newbuf = kmalloc(buf_len, GFP_NOFS);
-    memset(newbuf, 0, buf_len - 1);
+    char *newbuf = kmalloc(len, GFP_NOFS);
+    int encrypting = 0;
+
+    memset(newbuf, 0, len);
+    memcpy(newbuf, buf, len - 1);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
     // so just pass through
     if (filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
-        printk("Intercepting write of: %s | size: %d | to parent: %s\n" KERN_INFO, buf, len, filp->f_dentry->d_name.name);
         
         second_last = NULL;
         parent = filp->f_dentry->d_parent;
         while (parent != NULL) {
             if (strncmp(parent->d_name.name, "/", 2) == 0) {
                 if (second_last != NULL &&
-                    strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR, strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
-                    // The file is in the encrypt directory, work our magic
-                    
+                    strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
+                        strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                    // The file is in the encrypt directory, work your magic
+                    for ( i = 0; i < len; i++ )
+                        newbuf[i] = buf[i] ^ ext3301_enc_key; // Simple encryption
+                    newbuf[len] = 0;
+                    encrypting = 1;
                 }
                 // We're at the root of parents, break out
                 break;
@@ -96,7 +105,18 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
         
     }
 
-    return do_sync_write(filp, buf, len, ppos);
+    if (encrypting) {
+        // Switch to kernel space before trying to write. Avoids EFAULT
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        retval = do_sync_write(filp, newbuf, len, ppos);
+        set_fs(old_fs);
+    } else
+        retval = do_sync_write(filp, buf, len, ppos);
+
+    kfree(newbuf);
+
+    return retval;
 }
 
 /*

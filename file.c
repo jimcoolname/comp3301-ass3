@@ -119,13 +119,89 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
     return retval;
 }
 
+/* 
+ * ===  FUNCTION  ==============================================================
+ *         Name:  do_encrypted_sync_read
+ *
+ *  Description:  Wrapper for do_sync_read. Takes same params, and when
+ *                encryption key is not set, it defaults to just being a
+ *                passthrough method anyway.
+ *
+ *                If the file being read from is under the root folder named by
+ *                EXT3301_ENCRYPT_DIR, then this method takes the current buffer
+ *                and encrypts each element of it.
+ * 
+ *      Version:  0.0.1
+ *       Params:  struct file *filp
+ *                char __user *buf
+ *                size_t len
+ *                loff_t *ppos
+ *      Returns:  ssize_t number of bytes written
+ *        Usage:  do_encrypted_sync_read( struct file *filp, char __user *buf,
+ *                    size_t len, loff_t *ppos )
+ *      Outputs:  N/A
+
+ *        Notes:  
+ * =============================================================================
+ */
+ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
+        loff_t *ppos)
+{
+    int i;
+    mm_segment_t old_fs;
+    ssize_t retval;
+    struct dentry *parent, *second_last;
+    char *newbuf = kmalloc(len, GFP_NOFS);
+
+    memset(newbuf, 0, len);
+
+    // Switch to kernel space before trying to write. Avoids EFAULT
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    retval = do_sync_read(filp, newbuf, len, ppos);
+    set_fs(old_fs);
+
+    // If we can't get the name, we can't tell whether it's the /encrypt directory
+    // so just pass through
+    if (filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
+        
+        second_last = NULL;
+        parent = filp->f_dentry->d_parent;
+        while (parent != NULL) {
+            if (strncmp(parent->d_name.name, "/", 2) == 0) {
+                if (second_last != NULL &&
+                    strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
+                        strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                    // The file is in the encrypt directory, work your magic
+                    for ( i = 0; i < len; i++ )
+                        newbuf[i] = newbuf[i] ^ ext3301_enc_key; // Simple encryption
+                    newbuf[len] = 0;
+                }
+                // We're at the root of parents, break out
+                break;
+            }
+
+            // Next parent
+            second_last = parent;
+            parent = parent->d_parent;
+        }
+        
+    }
+
+    copy_to_user(buf, newbuf, len);
+
+    kfree(newbuf);
+
+    return retval;
+}
+
 /*
  * We have mostly NULL's here: the current defaults are ok for
  * the ext2 filesystem.
  */
 const struct file_operations ext2_file_operations = {
 	.llseek		= generic_file_llseek,
-	.read		= do_sync_read,
+	.read		= do_encrypted_sync_read,
 	.write		= do_encrypted_sync_write,
 	.aio_read	= generic_file_aio_read,
 	.aio_write	= generic_file_aio_write,

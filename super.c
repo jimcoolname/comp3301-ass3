@@ -38,6 +38,8 @@
 #include "acl.h"
 #include "xip.h"
 
+int ext3301_enc_key;
+
 static void ext2_sync_super(struct super_block *sb,
 			    struct ext2_super_block *es);
 static int ext2_remount (struct super_block * sb, int * flags, char * data);
@@ -382,7 +384,8 @@ enum {
 	Opt_err_ro, Opt_nouid32, Opt_nocheck, Opt_debug,
 	Opt_oldalloc, Opt_orlov, Opt_nobh, Opt_user_xattr, Opt_nouser_xattr,
 	Opt_acl, Opt_noacl, Opt_xip, Opt_ignore, Opt_err, Opt_quota,
-	Opt_usrquota, Opt_grpquota, Opt_reservation, Opt_noreservation
+	Opt_usrquota, Opt_grpquota, Opt_reservation, Opt_noreservation,
+	Opt_key
 };
 
 static const match_table_t tokens = {
@@ -416,6 +419,7 @@ static const match_table_t tokens = {
 	{Opt_usrquota, "usrquota"},
 	{Opt_reservation, "reservation"},
 	{Opt_noreservation, "noreservation"},
+        {Opt_key, "key=%u"},
 	{Opt_err, NULL}
 };
 
@@ -555,6 +559,11 @@ static int parse_options (char * options,
 		case Opt_noreservation:
 			clear_opt(sbi->s_mount_opt, RESERVATION);
 			printk("reservations OFF\n");
+			break;
+	        case Opt_key:
+			if (match_int(&args[0], &option))
+				return 0;
+			ext3301_enc_key = option & 0xFF;
 			break;
 		case Opt_ignore:
 			break;
@@ -825,6 +834,8 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	sbi->s_resgid = le16_to_cpu(es->s_def_resgid);
 	
 	set_opt(sbi->s_mount_opt, RESERVATION);
+
+        ext3301_enc_key = 0;
 
 	if (!parse_options ((char *) data, sbi))
 		goto failed_mount;

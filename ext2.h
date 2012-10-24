@@ -69,6 +69,7 @@ struct ext2_inode_info {
  * COMP3301 Assignment 3 global vars and defines
  */
 #define EXT3301_ENCRYPT_DIR "encrypt"
+extern int ext3301_enc_key;
 
 /*
  * Function prototypes

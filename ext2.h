@@ -65,6 +65,10 @@ struct ext2_inode_info {
  */
 #define EXT2_STATE_NEW			0x00000001 /* inode is newly created */
 
+/*
+ * COMP3301 Assignment 3 global vars and defines
+ */
+#define EXT3301_ENCRYPT_DIR "encrypt"
 
 /*
  * Function prototypes

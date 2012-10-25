@@ -305,7 +305,7 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
         struct dentry *parent, *second_last, *loop_dentry;
         int i, j, k;
         struct file *file;
-        char *old_filename, *new_filename, *rc, rdbuf[80];
+        char *old_filename, *new_filename, *rc, rdbuf[80], revtmp;
         char *mvbuf = NULL, *tmpmvbuf = NULL;
 	struct inode * old_inode = old_dentry->d_inode;
 	struct inode * new_inode = new_dentry->d_inode;
@@ -394,12 +394,12 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
                         }
                         // We're at the root of parents, break out
                         break;
-                    } else {
+                    } else if (parent->d_name.name != NULL) {
                         /* Build both absolute filenames while we're in here.
                         * Since we are forced to traverse backwards, just put the
                         * chars within the array completely backwards
                         */
-                        for ( j = parent->d_name.len - 1; j >= 0; j-- ) {
+                        for ( j = strlen(parent->d_name.name); j >= 0; j-- ) {
                             rc[strlen(rc)] = parent->d_name.name[j];
                         }
 
@@ -418,15 +418,15 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
             rc = j ? old_filename : new_filename;
             k = strlen(rc) - 1;
             for ( i = k; i > k / 2; i-- ) {
-                rc[k - i] ^= rc[i];
-                rc[i] ^= rc[k - i];
-                rc[k - i] ^= rc[i];
+                revtmp = rc[k - i];
+                rc[k - i] = rc[i];
+                rc[i] = revtmp;
             }
         }
         // Make the paths absolute
         k = strlen(EXT3301_MOUNT_POINT);
-        memmove(old_filename + k, old_filename, k + 1);
-        memmove(new_filename + k, new_filename, k + 1);
+        memmove(old_filename + k, old_filename, strlen(old_filename));
+        memmove(new_filename + k, new_filename, strlen(new_filename));
         for ( i = 0; i < k; i++ )
             old_filename[i] = new_filename[i] = EXT3301_MOUNT_POINT[i];
         old_filename[MAXPATH - 1] = new_filename[MAXPATH - 1] = 0;
@@ -449,7 +449,7 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
                 filp_close(file, NULL);
             }
             if (enc_direction > 0) {
-                // Encrypt file contents. Contents are always read in decrypted
+                // Encrypt file contents if necessary. Contents are read decrypted always
                 for ( i = 0; i < strlen(mvbuf); i++ )
                     mvbuf[i] ^= ext3301_enc_key;
             }

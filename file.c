@@ -88,11 +88,13 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
                 if (second_last != NULL &&
                     strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
                         strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                    //printk("EXT3301 ENCRYPT BEFORE: %s" KERN_INFO, newbuf);
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )
                         newbuf[i] = buf[i] ^ ext3301_enc_key; // Simple encryption
                     newbuf[len] = 0;
                     encrypting = 1;
+                    //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
                 }
                 // We're at the root of parents, break out
                 break;
@@ -172,10 +174,12 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
                 if (second_last != NULL &&
                     strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
                         strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                    //printk("EXT3301 DECRYPT BEFORE: %s" KERN_INFO, newbuf);
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )
                         newbuf[i] = newbuf[i] ^ ext3301_enc_key; // Simple encryption
                     newbuf[len] = 0;
+                    //printk("EXT3301 DECRYPT AFTER: %s" KERN_INFO, newbuf);
                 }
                 // We're at the root of parents, break out
                 break;

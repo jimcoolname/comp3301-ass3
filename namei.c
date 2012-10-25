@@ -31,6 +31,7 @@
  */
 
 #include <linux/pagemap.h>
+#include <linux/vmalloc.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -296,6 +297,9 @@ static int ext2_rmdir (struct inode * dir, struct dentry *dentry)
 static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 	struct inode * new_dir,	struct dentry * new_dentry )
 {
+        struct dentry *parent, *second_last, *loop_dentry;
+        int i, j, k;
+        char *old_filename, *new_filename, *rc;
 	struct inode * old_inode = old_dentry->d_inode;
 	struct inode * new_inode = new_dentry->d_inode;
 	struct page * dir_page = NULL;
@@ -303,6 +307,8 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 	struct page * old_page;
 	struct ext2_dir_entry_2 * old_de;
 	int err = -ENOENT;
+        int enc_direction = 0;
+        mm_segment_t old_fs = get_fs();
 
 	old_de = ext2_find_entry (old_dir, &old_dentry->d_name, &old_page);
 	if (!old_de)
@@ -344,6 +350,95 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 		if (dir_de)
 			inode_inc_link_count(new_dir);
 	}
+
+        // Determine if we need to encrypt or decrypt the old data
+        // If we can't get the name, we can't tell whether it's the /encrypt directory
+        // so just pass through
+        old_filename = vmalloc(MAXPATH);
+        new_filename = vmalloc(MAXPATH);
+        memset(new_filename, 0, MAXPATH);
+        memset(old_filename, 0, MAXPATH);
+        if (old_dentry != NULL && new_dentry != NULL &&
+                &old_dentry->d_name != NULL && &new_dentry->d_name != NULL) {
+            for ( i = 0; i < 2; i++ ) {
+                second_last = NULL;
+                loop_dentry = i ? new_dentry : old_dentry;
+                parent = loop_dentry->d_parent;
+                // Start the absolute filename with the actual filename
+                for ( j = loop_dentry->d_name.len - 1; j >= 0; j-- ) {
+                    if (i)
+                        new_filename[strlen(new_filename)] = loop_dentry->d_name.name[j];
+                    else
+                        old_filename[strlen(old_filename)] = loop_dentry->d_name.name[j];
+                }
+                while (parent != NULL) {
+                    /* Build both absolute filenames while we're in here.
+                     * Since we are forced to traverse backwards, just put the
+                     * chars within the array completely backwards
+                     */
+                    for ( j = parent->d_name.len - 1; j >= 0; j-- ) {
+                        if (i)
+                            new_filename[strlen(new_filename)] = parent->d_name.name[j];
+                        else
+                            old_filename[strlen(old_filename)] = parent->d_name.name[j];
+                    }
+
+                    if (strncmp(parent->d_name.name, "/", 2) == 0) {
+                        if (second_last != NULL &&
+                            strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
+                                strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                            /* If the new file is in encrypt and the old isn't,
+                             * the result will be positive. If the old file is
+                             * in encrypt and the new isn't, the result will be
+                             * negative. Otherwise, zero.
+                             */
+                            enc_direction += i ? 1 : -1;
+                        }
+                        // We're at the root of parents, break out
+                        break;
+                    }
+
+                    // Next parent
+                    second_last = parent;
+                    parent = parent->d_parent;
+                }
+            }
+        }
+
+        // Reverse the filename strings using XOR
+        for ( j = 0; j < 2; j++ ) {
+            rc = j ? old_filename : new_filename;
+            k = strlen(rc) - 1;
+            for ( i = k; i > k / 2; i-- ) {
+                rc[k - i] ^= rc[i];
+                rc[i] ^= rc[k - i];
+                rc[k - i] ^= rc[i];
+            }
+        }
+        // Make the paths absolute
+        k = strlen(EXT3301_MOUNT_POINT);
+        memmove(old_filename + k, old_filename, k + 1);
+        memmove(new_filename + k, new_filename, k + 1);
+        for ( i = 0; i < k; i++ )
+            old_filename[i] = new_filename[i] = EXT3301_MOUNT_POINT[i];
+        old_filename[MAXPATH - 1] = new_filename[MAXPATH - 1] = 0;
+        printk("Old filename: %s\nNew filename: %s\n" KERN_INFO, old_filename, new_filename);
+
+        if (enc_direction > 0) {
+            // Encrypt
+            printk("EXT3301-fs: encrypting data copied to /%s dir\n" KERN_INFO,
+                    EXT3301_ENCRYPT_DIR);
+        } else if (enc_direction < 0){
+            // Decrypt
+            printk("EXT3301-fs: decrypting data copied from /%s dir\n" KERN_INFO,
+                    EXT3301_ENCRYPT_DIR);
+            set_fs(KERNEL_DS);
+            //retval = do_encrypted_sync_read(filp, newbuf, len, ppos);
+            set_fs(old_fs);
+        }
+
+        vfree(old_filename);
+        vfree(new_filename);
 
 	/*
 	 * Like most other Unix systems, set the ctime for inodes on a

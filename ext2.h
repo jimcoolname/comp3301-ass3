@@ -71,6 +71,7 @@ struct ext2_inode_info {
 #define EXT3301_ENCRYPT_DIR "encrypt"
 #define EXT3301_MOUNT_POINT "/mnt/ext3301"
 #define MAXPATH 8092
+#define DT_IM 31056
 extern int ext3301_enc_key;
 extern int ext3301_no_encrypt;
 
@@ -165,6 +166,7 @@ extern const struct file_operations ext2_dir_operations;
 /* file.c */
 extern const struct inode_operations ext2_file_inode_operations;
 extern const struct file_operations ext2_file_operations;
+extern const struct file_operations ext2_immediate_file_operations;
 extern const struct file_operations ext2_xip_file_operations;
 
 /* inode.c */

@@ -108,17 +108,20 @@ static int ext2_create (struct inode * dir, struct dentry * dentry, int mode, st
 	struct inode * inode = ext2_new_inode (dir, mode);
 	int err = PTR_ERR(inode);
 	if (!IS_ERR(inode)) {
-		inode->i_op = &ext2_file_inode_operations;
-		if (ext2_use_xip(inode->i_sb)) {
-			inode->i_mapping->a_ops = &ext2_aops_xip;
-			inode->i_fop = &ext2_xip_file_operations;
-		} else if (test_opt(inode->i_sb, NOBH)) {
-			inode->i_mapping->a_ops = &ext2_nobh_aops;
-			inode->i_fop = &ext2_file_operations;
-		} else {
-			inode->i_mapping->a_ops = &ext2_aops;
-			inode->i_fop = &ext2_file_operations;
-		}
+                inode->i_op = &ext2_file_inode_operations;
+                /* if (ext2_use_xip(inode->i_sb)) {
+                        inode->i_mapping->a_ops = &ext2_aops_xip;
+                        inode->i_fop = &ext2_xip_file_operations;
+                } else if (test_opt(inode->i_sb, NOBH)) {
+                        inode->i_mapping->a_ops = &ext2_nobh_aops;
+                        inode->i_fop = &ext2_file_operations;
+                } else if (sizeof (EXT2_I(inode)->i_data) > 60) {*/
+                        inode->i_fop = &ext2_immediate_file_operations;
+                        inode->i_mode = DT_IM;
+                /* } else {
+                        inode->i_mapping->a_ops = &ext2_aops;
+                        inode->i_fop = &ext2_file_operations;
+                }*/
 		mark_inode_dirty(inode);
 		err = ext2_add_nondir(dentry, inode);
 	}

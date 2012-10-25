@@ -200,6 +200,175 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
     return retval;
 }
 
+/* 
+ * ===  FUNCTION  ==============================================================
+ *         Name:  do_immediate_encrypted_sync_write
+ *
+ *  Description:  Handles writing to ext3301 immediate files. Anything less than
+ *                60 bytes is stored directly in the inode.
+ *                If this method detects the write will overflow that 60 bytes,
+ *                blocks are allocated and writing is passed to
+ *                do_encrypted_sync_write to handle.
+ *
+ *                If the file being written to is under the root folder named by
+ *                EXT3301_ENCRYPT_DIR, then this method takes the current buffer
+ *                and encrypts each element of it.
+ * 
+ *      Version:  0.0.1
+ *       Params:  struct file *filp
+ *                const char __user *buf
+ *                size_t len
+ *                loff_t *ppos
+ *      Returns:  ssize_t number of bytes written
+ *        Usage:  do_immediate_encrypted_sync_write( struct file *filp,
+ *                    const char __user *buf, size_t len, loff_t *ppos )
+ *      Outputs:  N/A
+
+ *        Notes:  
+ * =============================================================================
+ */
+ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *buf,
+        size_t len, loff_t *ppos)
+{
+    int i;
+    mm_segment_t old_fs;
+    struct dentry *parent, *second_last;
+    char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
+    int encrypting = 0;
+
+    if (filp->f_dentry->d_inode->i_mode == DT_REG)
+        return do_encrypted_sync_write(filp, buf, len, ppos);
+
+    memset(newbuf, 0, len + 1);
+    memcpy(newbuf, buf, len);
+
+    // If we can't get the name, we can't tell whether it's the /encrypt directory
+    // so just pass through
+    if (!ext3301_no_encrypt && filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
+        
+        second_last = NULL;
+        parent = filp->f_dentry->d_parent;
+        while (parent != NULL) {
+            if (strncmp(parent->d_name.name, "/", 2) == 0) {
+                if (second_last != NULL &&
+                    strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
+                        strlen(EXT3301_ENCRYPT_DIR) + 2) == 0) {
+                    //printk("EXT3301 ENCRYPT BEFORE: %s" KERN_INFO, newbuf);
+                    // The file is in the encrypt directory, work your magic
+                    for ( i = 0; i < len; i++ )
+                        newbuf[i] = buf[i] ^ ext3301_enc_key; // Simple encryption
+                    newbuf[len] = 0;
+                    encrypting = 1;
+                    //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
+                }
+                // We're at the root of parents, break out
+                break;
+            }
+
+            // Next parent
+            second_last = parent;
+            parent = parent->d_parent;
+        }
+        
+    }
+
+    writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
+    if (encrypting) {
+        // Switch to kernel space before trying to write. Avoids EFAULT
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        memcpy(&writer[(int)ppos], newbuf, len);
+        //retval = (filp, newbuf, len, ppos);
+        set_fs(old_fs);
+    } else
+        memcpy(&writer[(int)ppos], buf, len);
+
+    kfree(newbuf);
+
+    return len;
+}
+
+/* 
+ * ===  FUNCTION  ==============================================================
+ *         Name:  do_immediate_encrypted_sync_read
+ *
+ *  Description:  Handles reading from ext3301 immediate files. Anything less than
+ *                60 bytes is stored directly in the inode.
+ *
+ *                If the file being read to is under the root folder named by
+ *                EXT3301_ENCRYPT_DIR, then this method takes the current buffer
+ *                and encrypts each element of it.
+ * 
+ *      Version:  0.0.1
+ *       Params:  struct file *filp
+ *                const char __user *buf
+ *                size_t len
+ *                loff_t *ppos
+ *      Returns:  ssize_t number of bytes written
+ *        Usage:  do_immediate_encrypted_sync_read( struct file *filp,
+ *                    const char __user *buf, size_t len, loff_t *ppos )
+ *      Outputs:  N/A
+
+ *        Notes:  
+ * =============================================================================
+ */
+ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
+        size_t len, loff_t *ppos)
+{
+    int i, buflen;
+    mm_segment_t old_fs;
+    struct dentry *parent, *second_last;
+    char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
+    int encrypting = 0;
+
+    if (filp->f_dentry->d_inode->i_mode == DT_REG)
+        return do_encrypted_sync_read(filp, buf, len, ppos);
+
+    memset(newbuf, 0, len + 1);
+    writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
+    // Switch to kernel space before trying to write. Avoids EFAULT
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    memcpy(newbuf, &writer[(int)ppos], len);
+    set_fs(old_fs);
+
+    // If we can't get the name, we can't tell whether it's the /encrypt directory
+    // so just pass through
+    if (!ext3301_no_encrypt && filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
+        
+        second_last = NULL;
+        parent = filp->f_dentry->d_parent;
+        while (parent != NULL) {
+            if (strncmp(parent->d_name.name, "/", 2) == 0) {
+                if (second_last != NULL &&
+                    strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
+                        strlen(EXT3301_ENCRYPT_DIR) + 2) == 0) {
+                    //printk("EXT3301 ENCRYPT BEFORE: %s" KERN_INFO, newbuf);
+                    // The file is in the encrypt directory, work your magic
+                    for ( i = 0; i < len; i++ )
+                        newbuf[i] = newbuf[i] ^ ext3301_enc_key; // Simple encryption
+                    newbuf[len] = 0;
+                    encrypting = 1;
+                    //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
+                }
+                // We're at the root of parents, break out
+                break;
+            }
+
+            // Next parent
+            second_last = parent;
+            parent = parent->d_parent;
+        }
+        
+    }
+
+    buflen = strlen(newbuf);
+    copy_to_user(buf, newbuf, buflen + 1);
+    kfree(newbuf);
+
+    return buflen;
+}
+
 /*
  * We have mostly NULL's here: the current defaults are ok for
  * the ext2 filesystem.
@@ -208,6 +377,24 @@ const struct file_operations ext2_file_operations = {
 	.llseek		= generic_file_llseek,
 	.read		= do_encrypted_sync_read,
 	.write		= do_encrypted_sync_write,
+	.aio_read	= generic_file_aio_read,
+	.aio_write	= generic_file_aio_write,
+	.unlocked_ioctl = ext2_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ext2_compat_ioctl,
+#endif
+	.mmap		= generic_file_mmap,
+	.open		= generic_file_open,
+	.release	= ext2_release_file,
+	.fsync		= simple_fsync,
+	.splice_read	= generic_file_splice_read,
+	.splice_write	= generic_file_splice_write,
+};
+
+const struct file_operations ext2_immediate_file_operations = {
+	.llseek		= generic_file_llseek,
+	.read		= do_immediate_encrypted_sync_read,
+	.write		= do_immediate_encrypted_sync_write,
 	.aio_read	= generic_file_aio_read,
 	.aio_write	= generic_file_aio_write,
 	.unlocked_ioctl = ext2_ioctl,

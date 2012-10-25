@@ -39,6 +39,7 @@
 #include "xip.h"
 
 int ext3301_enc_key;
+int ext3301_no_encrypt;
 
 static void ext2_sync_super(struct super_block *sb,
 			    struct ext2_super_block *es);
@@ -836,6 +837,7 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	set_opt(sbi->s_mount_opt, RESERVATION);
 
         ext3301_enc_key = 0;
+        ext3301_no_encrypt = 0;
 
 	if (!parse_options ((char *) data, sbi))
 		goto failed_mount;

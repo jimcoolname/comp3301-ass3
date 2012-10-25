@@ -32,6 +32,11 @@
 
 #include <linux/pagemap.h>
 #include <linux/vmalloc.h>
+#include <linux/syscalls.h>
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/fcntl.h>
+#include <asm/uaccess.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -299,7 +304,9 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 {
         struct dentry *parent, *second_last, *loop_dentry;
         int i, j, k;
-        char *old_filename, *new_filename, *rc;
+        struct file *file;
+        char *old_filename, *new_filename, *rc, rdbuf[80];
+        char *mvbuf = NULL, *tmpmvbuf = NULL;
 	struct inode * old_inode = old_dentry->d_inode;
 	struct inode * new_inode = new_dentry->d_inode;
 	struct page * dir_page = NULL;
@@ -308,7 +315,10 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 	struct ext2_dir_entry_2 * old_de;
 	int err = -ENOENT;
         int enc_direction = 0;
+        loff_t pos = 0;
         mm_segment_t old_fs = get_fs();
+
+        memset(rdbuf, 0, 80);
 
 	old_de = ext2_find_entry (old_dir, &old_dentry->d_name, &old_page);
 	if (!old_de)
@@ -364,25 +374,13 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
                 second_last = NULL;
                 loop_dentry = i ? new_dentry : old_dentry;
                 parent = loop_dentry->d_parent;
+                rc = i ? new_filename : old_filename;
                 // Start the absolute filename with the actual filename
                 for ( j = loop_dentry->d_name.len - 1; j >= 0; j-- ) {
-                    if (i)
-                        new_filename[strlen(new_filename)] = loop_dentry->d_name.name[j];
-                    else
-                        old_filename[strlen(old_filename)] = loop_dentry->d_name.name[j];
+                    rc[strlen(rc)] = loop_dentry->d_name.name[j];
                 }
+                rc[strlen(rc)] = '/';
                 while (parent != NULL) {
-                    /* Build both absolute filenames while we're in here.
-                     * Since we are forced to traverse backwards, just put the
-                     * chars within the array completely backwards
-                     */
-                    for ( j = parent->d_name.len - 1; j >= 0; j-- ) {
-                        if (i)
-                            new_filename[strlen(new_filename)] = parent->d_name.name[j];
-                        else
-                            old_filename[strlen(old_filename)] = parent->d_name.name[j];
-                    }
-
                     if (strncmp(parent->d_name.name, "/", 2) == 0) {
                         if (second_last != NULL &&
                             strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
@@ -396,6 +394,16 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
                         }
                         // We're at the root of parents, break out
                         break;
+                    } else {
+                        /* Build both absolute filenames while we're in here.
+                        * Since we are forced to traverse backwards, just put the
+                        * chars within the array completely backwards
+                        */
+                        for ( j = parent->d_name.len - 1; j >= 0; j-- ) {
+                            rc[strlen(rc)] = parent->d_name.name[j];
+                        }
+
+                        rc[strlen(rc)] = '/';
                     }
 
                     // Next parent
@@ -422,21 +430,47 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
         for ( i = 0; i < k; i++ )
             old_filename[i] = new_filename[i] = EXT3301_MOUNT_POINT[i];
         old_filename[MAXPATH - 1] = new_filename[MAXPATH - 1] = 0;
-        printk("Old filename: %s\nNew filename: %s\n" KERN_INFO, old_filename, new_filename);
 
-        if (enc_direction > 0) {
-            // Encrypt
-            printk("EXT3301-fs: encrypting data copied to /%s dir\n" KERN_INFO,
-                    EXT3301_ENCRYPT_DIR);
-        } else if (enc_direction < 0){
-            // Decrypt
-            printk("EXT3301-fs: decrypting data copied from /%s dir\n" KERN_INFO,
-                    EXT3301_ENCRYPT_DIR);
-            set_fs(KERNEL_DS);
-            //retval = do_encrypted_sync_read(filp, newbuf, len, ppos);
-            set_fs(old_fs);
+        set_fs(KERNEL_DS);
+        if (enc_direction != 0) {
+            // Read file contents from the old file
+            file = filp_open(old_filename, O_RDONLY, old_dir->i_mode);
+            if (!IS_ERR(file)) {
+                mvbuf = vmalloc(80);
+                memset(mvbuf, 0, 80);
+                while((k = vfs_read(file, rdbuf, 80, &pos)) > 0) {
+                    tmpmvbuf = vmalloc(strlen(mvbuf) + 1 + k);
+                    memcpy(tmpmvbuf, mvbuf, strlen(mvbuf) + 1);
+                    vfree(mvbuf);
+                    mvbuf = tmpmvbuf;
+                    strncat(mvbuf, rdbuf, k);
+                    memset(rdbuf, 0, 80);
+                }
+                filp_close(file, NULL);
+            }
+            if (enc_direction > 0) {
+                // Encrypt file contents. Contents are always read in decrypted
+                for ( i = 0; i < strlen(mvbuf); i++ )
+                    mvbuf[i] ^= ext3301_enc_key;
+            }
+
+            // Write file contents to the old file, ensuring they are not
+            // passed through the encrypter again
+            file = filp_open(old_filename, O_WRONLY, 0644);
+            if (!IS_ERR(file)) {
+                pos = 0;
+                k = 0;
+                while(k < strlen(mvbuf)) {
+                    ext3301_no_encrypt = 1;
+                    k += vfs_write(file, &mvbuf[k], strlen(&mvbuf[k]), &pos);
+                    ext3301_no_encrypt = 0;
+                }
+                filp_close(file, NULL);
+            }
         }
+        set_fs(old_fs);
 
+        vfree(mvbuf);
         vfree(old_filename);
         vfree(new_filename);
 
@@ -458,6 +492,7 @@ static int ext2_rename (struct inode * old_dir, struct dentry * old_dentry,
 		}
 		inode_dec_link_count(old_dir);
 	}
+
 	return 0;
 
 

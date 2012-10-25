@@ -79,7 +79,7 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
     // so just pass through
-    if (filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
+    if (!ext3301_no_encrypt && filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
         
         second_last = NULL;
         parent = filp->f_dentry->d_parent;
@@ -87,7 +87,7 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
             if (strncmp(parent->d_name.name, "/", 2) == 0) {
                 if (second_last != NULL &&
                     strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
-                        strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                        strlen(EXT3301_ENCRYPT_DIR) + 2) == 0) {
                     //printk("EXT3301 ENCRYPT BEFORE: %s" KERN_INFO, newbuf);
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )
@@ -165,7 +165,8 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
     // so just pass through
-    if (filp != NULL && filp->f_dentry != NULL && &filp->f_dentry->d_name != NULL) {
+    if (filp != NULL && filp->f_dentry != NULL &&
+            &filp->f_dentry->d_name != NULL) {
         
         second_last = NULL;
         parent = filp->f_dentry->d_parent;
@@ -173,7 +174,7 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
             if (strncmp(parent->d_name.name, "/", 2) == 0) {
                 if (second_last != NULL &&
                     strncmp(second_last->d_name.name, EXT3301_ENCRYPT_DIR,
-                        strlen(EXT3301_ENCRYPT_DIR) + 1) == 0) {
+                        strlen(EXT3301_ENCRYPT_DIR) + 2) == 0) {
                     //printk("EXT3301 DECRYPT BEFORE: %s" KERN_INFO, newbuf);
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )

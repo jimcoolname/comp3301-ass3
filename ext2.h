@@ -72,6 +72,7 @@ struct ext2_inode_info {
 #define EXT3301_MOUNT_POINT "/mnt/ext3301"
 #define MAXPATH 8092
 extern int ext3301_enc_key;
+extern int ext3301_no_encrypt;
 
 /*
  * Function prototypes

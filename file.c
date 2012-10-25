@@ -71,11 +71,11 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
     mm_segment_t old_fs;
     ssize_t retval;
     struct dentry *parent, *second_last;
-    char *newbuf = kmalloc(len, GFP_NOFS);
+    char *newbuf = kmalloc(len + 1, GFP_NOFS);
     int encrypting = 0;
 
-    memset(newbuf, 0, len);
-    memcpy(newbuf, buf, len - 1);
+    memset(newbuf, 0, len + 1);
+    memcpy(newbuf, buf, len);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
     // so just pass through

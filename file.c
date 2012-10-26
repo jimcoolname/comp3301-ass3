@@ -79,18 +79,19 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
     mm_segment_t old_fs;
     ssize_t retval;
     struct dentry *parent, *second_last;
-    char *newbuf = kmalloc(len + 1, GFP_NOFS);
+    char *newbuf = kmalloc(len, GFP_NOFS);
     int encrypting = 0;
     struct inode *inode = filp->f_dentry->d_inode;
 
     // If we get requests for immediate files, fix it
     if (inode->i_blocks == 0) {
+        kfree(newbuf);
         inode->i_fop = &ext2_immediate_file_operations;
         mark_inode_dirty(inode);
         return do_immediate_encrypted_sync_write(filp, buf, len, ppos);
     }
 
-    memset(newbuf, 0, len + 1);
+    memset(newbuf, 0, len);
     memcpy(newbuf, buf, len);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
@@ -108,7 +109,6 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )
                         newbuf[i] = buf[i] ^ ext3301_enc_key; // Simple encryption
-                    newbuf[len] = 0;
                     encrypting = 1;
                     //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
                 }
@@ -258,9 +258,8 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     mm_segment_t old_fs;
     struct dentry *parent, *second_last;
     char *writer, *convert;
-    char *newbuf = vmalloc(len + 1);
+    char *newbuf = vmalloc(len);
     ssize_t retval = 0;
-    int encrypting = 0;
     struct inode *inode = filp->f_dentry->d_inode;
 
     writer = (char*)(EXT2_I(inode)->i_data);
@@ -270,6 +269,7 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
 
     if (*ppos + len > 59) {
         // Convert to regular file and pass call on to do_encrypted_sync_write
+        vfree(newbuf);
         printk("File reached %d bytes. Converting to regular file\n" KERN_INFO, *ppos + len);
         // Get the data from the buffer
         convert = vmalloc(strlen(writer) + 1);
@@ -306,7 +306,7 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
         return retval;
     }
 
-    memset(newbuf, 0, len + 1);
+    memset(newbuf, 0, len);
     copy_from_user(newbuf, buf, len);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
@@ -324,8 +324,6 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
                     // The file is in the encrypt directory, work your magic
                     for ( i = 0; i < len; i++ )
                         newbuf[i] = buf[i] ^ ext3301_enc_key; // Simple encryption
-                    newbuf[len] = 0;
-                    encrypting = 1;
                     //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
                 }
                 // We're at the root of parents, break out
@@ -346,7 +344,7 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     filp->f_pos = *ppos;
     inode->i_size = *ppos;
 
-    ext2_write_inode(inode, 1);
+    mark_inode_dirty(inode);
 
     vfree(newbuf);
 
@@ -384,7 +382,6 @@ ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
     mm_segment_t old_fs;
     struct dentry *parent, *second_last;
     char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
-    int encrypting = 0;
 
     if (ppos == NULL)
         ppos = &filp->f_pos;
@@ -395,8 +392,10 @@ ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
     if (len > wlen)
         len = wlen;
     // EOF
-    if (wlen == 1)
+    if (wlen == 1) {
+        kfree(newbuf);
         return 0;
+    }
     
 
     // Switch to kernel space before trying to read. Avoids EFAULT
@@ -421,7 +420,6 @@ ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
                     for ( i = 0; i < len; i++ )
                         newbuf[i] = newbuf[i] ^ ext3301_enc_key; // Simple encryption
                     newbuf[len] = 0;
-                    encrypting = 1;
                     //printk("EXT3301 ENCRYPT AFTER: %s" KERN_INFO, newbuf);
                 }
                 // We're at the root of parents, break out

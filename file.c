@@ -138,7 +138,7 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
  *                char __user *buf
  *                size_t len
  *                loff_t *ppos
- *      Returns:  ssize_t number of bytes written
+ *      Returns:  ssize_t number of bytes read
  *        Usage:  do_encrypted_sync_read( struct file *filp, char __user *buf,
  *                    size_t len, loff_t *ppos )
  *      Outputs:  N/A
@@ -236,8 +236,8 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
     int encrypting = 0;
 
-    if (filp->f_dentry->d_inode->i_mode == DT_REG)
-        return do_encrypted_sync_write(filp, buf, len, ppos);
+    //if (de->file_type == DT_REG)
+        //return do_encrypted_sync_write(filp, buf, len, ppos);
 
     memset(newbuf, 0, len + 1);
     memcpy(newbuf, buf, len);
@@ -273,15 +273,20 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     }
 
     writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
+    printk("Writing to IM File with content %s\n" KERN_INFO, writer);
+    memset(&writer[(int)*ppos], 0, len);
     if (encrypting) {
         // Switch to kernel space before trying to write. Avoids EFAULT
         old_fs = get_fs();
         set_fs(KERNEL_DS);
-        memcpy(&writer[(int)ppos], newbuf, len);
-        //retval = (filp, newbuf, len, ppos);
+        memcpy(&writer[(int)*ppos], newbuf, len);
         set_fs(old_fs);
     } else
-        memcpy(&writer[(int)ppos], buf, len);
+        memcpy(&writer[(int)*ppos], buf, len);
+    *ppos += len;
+    filp->f_pos = *ppos;
+
+    mark_inode_dirty(filp->f_dentry->d_inode);
 
     kfree(newbuf);
 
@@ -315,21 +320,29 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
 ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
         size_t len, loff_t *ppos)
 {
-    int i, buflen;
+    int i, wlen;
     mm_segment_t old_fs;
     struct dentry *parent, *second_last;
     char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
     int encrypting = 0;
 
-    if (filp->f_dentry->d_inode->i_mode == DT_REG)
-        return do_encrypted_sync_read(filp, buf, len, ppos);
+    if (ppos == NULL)
+        ppos = &filp->f_pos;
 
     memset(newbuf, 0, len + 1);
     writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
-    // Switch to kernel space before trying to write. Avoids EFAULT
+    wlen = strlen(&writer[(int)*ppos]) + 1;
+    if (len > wlen)
+        len = wlen;
+    // EOF
+    if (wlen == 1)
+        return 0;
+    
+
+    // Switch to kernel space before trying to read. Avoids EFAULT
     old_fs = get_fs();
     set_fs(KERNEL_DS);
-    memcpy(newbuf, &writer[(int)ppos], len);
+    memcpy(newbuf, &writer[(int)*ppos], len);
     set_fs(old_fs);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
@@ -362,11 +375,12 @@ ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
         
     }
 
-    buflen = strlen(newbuf);
-    copy_to_user(buf, newbuf, buflen + 1);
+    *ppos += len;
+    filp->f_pos = *ppos;
+    copy_to_user(buf, newbuf, len);
     kfree(newbuf);
 
-    return buflen;
+    return len;
 }
 
 /*

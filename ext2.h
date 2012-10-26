@@ -71,7 +71,7 @@ struct ext2_inode_info {
 #define EXT3301_ENCRYPT_DIR "encrypt"
 #define EXT3301_MOUNT_POINT "/mnt/ext3301"
 #define MAXPATH 8092
-#define DT_IM 31056
+#define DT_IM 9
 extern int ext3301_enc_key;
 extern int ext3301_no_encrypt;
 

@@ -117,7 +117,8 @@ static int ext2_create (struct inode * dir, struct dentry * dentry, int mode, st
                         inode->i_fop = &ext2_file_operations;
                 } else if (sizeof (EXT2_I(inode)->i_data) > 60) {*/
                         inode->i_fop = &ext2_immediate_file_operations;
-                        inode->i_mode = DT_IM;
+                        inode->i_size = 0;
+                        memset((char*)(EXT2_I(inode)->i_data), 0, 60);
                 /* } else {
                         inode->i_mapping->a_ops = &ext2_aops;
                         inode->i_fop = &ext2_file_operations;

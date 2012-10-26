@@ -104,7 +104,7 @@ setflags_out:
 		return ret;
 	case EXT2_IOC_GETRSVSZ:
 		if (test_opt(inode->i_sb, RESERVATION)
-			&& S_ISREG(inode->i_mode)
+			&& (S_ISREG(inode->i_mode) || S_ISIM(inode->i_mode))
 			&& ei->i_block_alloc_info) {
 			rsv_window_size = ei->i_block_alloc_info->rsv_window_node.rsv_goal_size;
 			return put_user(rsv_window_size, (int __user *)arg);
@@ -112,7 +112,7 @@ setflags_out:
 		return -ENOTTY;
 	case EXT2_IOC_SETRSVSZ: {
 
-		if (!test_opt(inode->i_sb, RESERVATION) ||!S_ISREG(inode->i_mode))
+		if (!test_opt(inode->i_sb, RESERVATION) || (!S_ISREG(inode->i_mode) && !S_ISIM(inode->i_mode)))
 			return -ENOTTY;
 
 		if (!is_owner_or_cap(inode))

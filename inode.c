@@ -657,7 +657,7 @@ static int ext2_get_blocks(struct inode *inode,
 	 * Okay, we need to do block allocation.  Lazily initialize the block
 	 * allocation info here if necessary
 	*/
-	if (S_ISREG(inode->i_mode) && (!ei->i_block_alloc_info))
+	if ((S_ISREG(inode->i_mode) || S_ISIM(inode->i_mode)) && (!ei->i_block_alloc_info))
 		ext2_init_block_alloc_info(inode);
 
 	goal = ext2_find_goal(inode, iblock, partial);
@@ -1035,13 +1035,14 @@ void ext2_truncate(struct inode *inode)
 	long iblock;
 	unsigned blocksize;
 
-	if (!(S_ISREG(inode->i_mode) || S_ISDIR(inode->i_mode) ||
-	    S_ISLNK(inode->i_mode)))
+	if (!(S_ISREG(inode->i_mode) || S_ISIM(inode->i_mode) ||
+	            S_ISDIR(inode->i_mode) || S_ISLNK(inode->i_mode)))
 		return;
 	if (ext2_inode_is_fast_symlink(inode))
 		return;
 	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
+	printk("Truncating %d blocks total %d bytes\n" KERN_INFO, inode->i_blocks, inode->i_size);
 	if (inode->i_blocks) {
 
                 blocksize = inode->i_sb->s_blocksize;
@@ -1130,6 +1131,8 @@ do_indirects:
         // Don't care what it was before. Clear the mem and call it an immediate
         inode->i_fop = &ext2_immediate_file_operations;
         inode->i_size = 0;
+        inode->i_mode &= ~(S_IFREG & S_IFMT);
+        inode->i_mode |= S_IFIM & S_IFMT;
         memset((char*)(EXT2_I(inode)->i_data), 0, 60);
 
 	if (inode_needs_sync(inode)) {
@@ -1275,7 +1278,7 @@ struct inode *ext2_iget (struct super_block *sb, unsigned long ino)
 	ei->i_frag_size = raw_inode->i_fsize;
 	ei->i_file_acl = le32_to_cpu(raw_inode->i_file_acl);
 	ei->i_dir_acl = 0;
-	if (S_ISREG(inode->i_mode))
+	if (S_ISREG(inode->i_mode) || S_ISIM(inode->i_mode))
 		inode->i_size |= ((__u64)le32_to_cpu(raw_inode->i_size_high)) << 32;
 	else
 		ei->i_dir_acl = le32_to_cpu(raw_inode->i_dir_acl);
@@ -1292,7 +1295,7 @@ struct inode *ext2_iget (struct super_block *sb, unsigned long ino)
 	for (n = 0; n < EXT2_N_BLOCKS; n++)
 		ei->i_data[n] = raw_inode->i_block[n];
 
-	if (S_ISREG(inode->i_mode)) {
+	if (S_ISREG(inode->i_mode) || S_ISIM(inode->i_mode)) {
 		inode->i_op = &ext2_file_inode_operations;
 		if (ext2_use_xip(inode->i_sb)) {
 			inode->i_mapping->a_ops = &ext2_aops_xip;
@@ -1397,7 +1400,7 @@ int ext2_write_inode(struct inode *inode, int do_sync)
 	raw_inode->i_frag = ei->i_frag_no;
 	raw_inode->i_fsize = ei->i_frag_size;
 	raw_inode->i_file_acl = cpu_to_le32(ei->i_file_acl);
-	if (!S_ISREG(inode->i_mode))
+	if (!S_ISREG(inode->i_mode) && !S_ISIM(inode->i_mode))
 		raw_inode->i_dir_acl = cpu_to_le32(ei->i_dir_acl);
 	else {
 		raw_inode->i_size_high = cpu_to_le32(inode->i_size >> 32);

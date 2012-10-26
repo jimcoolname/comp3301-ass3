@@ -290,6 +290,10 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
             inode->i_fop = &ext2_file_operations;
         }
 
+        // Turn it into a regular file
+        inode->i_mode &= ~(S_IFIM & S_IFMT);
+        inode->i_mode |= S_IFREG & S_IFMT;
+
         EXT2_I(filp->f_dentry->d_inode)->i_data[0] = ext2_new_block(inode, 0, &errp);
         mark_inode_dirty(inode);
 

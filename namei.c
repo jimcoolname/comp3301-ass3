@@ -111,6 +111,8 @@ static int ext2_create (struct inode * dir, struct dentry * dentry, int mode, st
                 inode->i_op = &ext2_file_inode_operations;
                 inode->i_fop = &ext2_immediate_file_operations;
                 inode->i_size = 0;
+                inode->i_mode &= ~(S_IFREG & S_IFMT);
+                inode->i_mode |= S_IFIM & S_IFMT;
                 memset((char*)(EXT2_I(inode)->i_data), 0, 60);
 		mark_inode_dirty(inode);
 		err = ext2_add_nondir(dentry, inode);

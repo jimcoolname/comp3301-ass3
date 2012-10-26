@@ -26,6 +26,12 @@
 #include "xip.h"
 #include <asm/uaccess.h>
 
+// Forward delcarations
+ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *buf,
+        size_t len, loff_t *ppos);
+ssize_t do_immediate_encrypted_sync_read(struct file *filp, char __user *buf,
+        size_t len, loff_t *ppos);
+
 /*
  * Called when filp is released. This happens when all file descriptors
  * for a single struct file are closed. Note that different open() calls
@@ -75,6 +81,14 @@ ssize_t do_encrypted_sync_write(struct file *filp, const char __user *buf,
     struct dentry *parent, *second_last;
     char *newbuf = kmalloc(len + 1, GFP_NOFS);
     int encrypting = 0;
+    struct inode *inode = filp->f_dentry->d_inode;
+
+    // If we get requests for immediate files, fix it
+    if (inode->i_blocks == 0) {
+        inode->i_fop = &ext2_immediate_file_operations;
+        mark_inode_dirty(inode);
+        return do_immediate_encrypted_sync_write(filp, buf, len, ppos);
+    }
 
     memset(newbuf, 0, len + 1);
     memcpy(newbuf, buf, len);
@@ -156,6 +170,14 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
     ssize_t retval;
     struct dentry *parent, *second_last;
     char *newbuf = kmalloc(len, GFP_NOFS);
+    struct inode *inode = filp->f_dentry->d_inode;
+
+    // If we get requests for immediate files, fix it
+    if (inode->i_blocks == 0) {
+        inode->i_fop = &ext2_immediate_file_operations;
+        mark_inode_dirty(inode);
+        return do_immediate_encrypted_sync_read(filp, buf, len, ppos);
+    }
 
     memset(newbuf, 0, len);
 

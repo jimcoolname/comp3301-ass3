@@ -19,9 +19,11 @@
  */
 
 #include <linux/time.h>
+#include <linux/vmalloc.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
+#include "xip.h"
 #include <asm/uaccess.h>
 
 /*
@@ -230,14 +232,53 @@ ssize_t do_encrypted_sync_read(struct file *filp, char __user *buf, size_t len,
 ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *buf,
         size_t len, loff_t *ppos)
 {
-    int i;
+    int i, errp;
     mm_segment_t old_fs;
     struct dentry *parent, *second_last;
-    char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer;
+    char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer, *convert;
+    ssize_t retval = 0;
     int encrypting = 0;
+    struct inode *inode = filp->f_dentry->d_inode;
 
-    //if (de->file_type == DT_REG)
-        //return do_encrypted_sync_write(filp, buf, len, ppos);
+    writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
+
+    if (*ppos + len > 60) {
+        // Convert to regular file and pass call on to do_encrypted_sync_write
+        printk("File reached %d bytes. Converting to regular file\n" KERN_INFO, *ppos + len);
+        // Get the data from the buffer
+        convert = vmalloc(strlen(writer) + 1);
+        memset(convert, 0, strlen(writer) + 1);
+        memcpy(convert, writer, strlen(writer));
+        convert[strlen(writer)] = 0;
+        filp->f_pos = 0;
+
+        // Change file operations
+        if (ext2_use_xip(inode->i_sb)) {
+            inode->i_mapping->a_ops = &ext2_aops_xip;
+            inode->i_fop = &ext2_xip_file_operations;
+        } else if (test_opt(inode->i_sb, NOBH)) {
+            inode->i_mapping->a_ops = &ext2_nobh_aops;
+            inode->i_fop = &ext2_file_operations;
+        } else {
+            inode->i_mapping->a_ops = &ext2_aops;
+            inode->i_fop = &ext2_file_operations;
+        }
+
+        EXT2_I(filp->f_dentry->d_inode)->i_data[0] = ext2_new_block(inode, 0, &errp);
+        mark_inode_dirty(inode);
+
+        // Write original data
+        old_fs = get_fs();
+        set_fs(KERNEL_DS);
+        retval = do_encrypted_sync_write(filp, convert, strlen(convert), &filp->f_pos);
+        set_fs(old_fs);
+        vfree(convert);
+
+        // Write new data
+        retval = do_encrypted_sync_write(filp, buf, len, ppos);
+
+        return retval;
+    }
 
     memset(newbuf, 0, len + 1);
     memcpy(newbuf, buf, len);
@@ -272,21 +313,17 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
         
     }
 
-    writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
-    printk("Writing to IM File with content %s\n" KERN_INFO, writer);
-    memset(&writer[(int)*ppos], 0, len);
-    if (encrypting) {
-        // Switch to kernel space before trying to write. Avoids EFAULT
-        old_fs = get_fs();
-        set_fs(KERNEL_DS);
-        memcpy(&writer[(int)*ppos], newbuf, len);
-        set_fs(old_fs);
-    } else
-        memcpy(&writer[(int)*ppos], buf, len);
+    printk("Writing \"%s\" to IM File at %d with existing content \"%s\"\n" KERN_INFO, newbuf, *ppos, writer);
+    // Switch to kernel space before trying to write. Avoids EFAULT
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+    memcpy(&writer[(int)*ppos], newbuf, len);
+    set_fs(old_fs);
     *ppos += len;
     filp->f_pos = *ppos;
+    inode->i_size = *ppos;
 
-    mark_inode_dirty(filp->f_dentry->d_inode);
+    mark_inode_dirty(inode);
 
     kfree(newbuf);
 

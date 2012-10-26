@@ -1,0 +1,50 @@
+1. Discuss what happens in your implementation if you attempt to create a symbolic link
+from:
+(a) outside the encrypted directory to a file inside the directory (for instance /foo !
+/encrypt/foobar)
+The data written to the file is correctly encrypted/decrypted. This is not what I would
+have expected, but changing the encryption key shows it’s what happens.
+
+(b) inside the encrypted directory to a file outside it (for instance /encrypt/foobar !
+/foo)
+Same as 1a.
+
+I would suggest that the reason this happens is that a symlink is not a physical link to
+a file, and is rendered invalid if a file is removed. With a symlink, you are effectively
+just creating an abstraction layer to the actual path. So when you call
+/mnt/ext3301/symlink_to_encrypt it really opens /mnt/ext3301/encrypt/path_at_end_of_link.
+
+Explain why each of these either works or does not work, and explain why.
+2. Discuss what happens in your implementation if you attempt to create a hard link from:
+(a) outside the encrypted directory to a file inside the directory (for instance /foo !
+/encrypt/foobar)
+Link creates successfully. Input and output is garbled in both directions.
+
+(b) inside the encrypted directory to a file outside it (for instance /encrypt/foobar !
+/foo)
+Link creates successfully. Input and output is garbled in both directions. This would be
+because a hardlink is not “followed” like a symlink, but written to.
+Encryption/Decryption is done on a “what’s the path? does it include /encrypt?” basis.
+With a hardlink, the answer to that would be the path to the link not the target.
+
+(c) another file system to a file inside the encrypted directory
+I receive an error “Invalid cross-device link”. I suspect this is intentional to prevent
+corruption by writing to a hardlink on one file system using it’s file operations which
+are not compatible with the other file system. As well as that, some file systems do
+not support hard links at all anyway.
+
+Explain why each of these either works or does not work, and explain why.
+3. What would happen if you run e2fsck over an ext3301 file system that:
+(a) contains only regular files
+e2fsck reports that the file system is clean. This is as expected due to ext3301
+behaving the same as a regular ext2 file system when files are not encrypted.
+
+(b) contains only encrypted files
+e2fsck reports that the file system is clean. This makes sense as the encryption only
+modifies the file internals, not any metadata about the file contained within the inode.
+
+(c) contains only immediate files
+I receive a warning for each file saying it has an invalid mode (050644). This is
+because DT_IM is 5. e2fsck was expecting a valid mode like DT_REG etc.
+
+Discuss the behaviour you see and suggest why this happens.

@@ -1042,55 +1042,58 @@ void ext2_truncate(struct inode *inode)
 		return;
 	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
+	if (inode->i_blocks) {
 
-	blocksize = inode->i_sb->s_blocksize;
-	iblock = (inode->i_size + blocksize-1)
-					>> EXT2_BLOCK_SIZE_BITS(inode->i_sb);
+                blocksize = inode->i_sb->s_blocksize;
+                iblock = (inode->i_size + blocksize-1)
+                                                >> EXT2_BLOCK_SIZE_BITS(inode->i_sb);
 
-	if (mapping_is_xip(inode->i_mapping))
-		xip_truncate_page(inode->i_mapping, inode->i_size);
-	else if (test_opt(inode->i_sb, NOBH))
-		nobh_truncate_page(inode->i_mapping,
-				inode->i_size, ext2_get_block);
-	else
-		block_truncate_page(inode->i_mapping,
-				inode->i_size, ext2_get_block);
+                if (mapping_is_xip(inode->i_mapping))
+                        xip_truncate_page(inode->i_mapping, inode->i_size);
+                else if (test_opt(inode->i_sb, NOBH))
+                        nobh_truncate_page(inode->i_mapping,
+                                        inode->i_size, ext2_get_block);
+                else
+                        block_truncate_page(inode->i_mapping,
+                                        inode->i_size, ext2_get_block);
 
-	n = ext2_block_to_path(inode, iblock, offsets, NULL);
-	if (n == 0)
-		return;
+                n = ext2_block_to_path(inode, iblock, offsets, NULL);
+                if (n == 0)
+                        return;
 
-	/*
-	 * From here we block out all ext2_get_block() callers who want to
-	 * modify the block allocation tree.
-	 */
-	mutex_lock(&ei->truncate_mutex);
+                /*
+                * From here we block out all ext2_get_block() callers who want to
+                * modify the block allocation tree.
+                */
+                mutex_lock(&ei->truncate_mutex);
 
-	if (n == 1) {
-		ext2_free_data(inode, i_data+offsets[0],
-					i_data + EXT2_NDIR_BLOCKS);
-		goto do_indirects;
-	}
+                if (n == 1) {
+                        ext2_free_data(inode, i_data+offsets[0],
+                                                i_data + EXT2_NDIR_BLOCKS);
+                        goto do_indirects;
+                }
 
-	partial = ext2_find_shared(inode, n, offsets, chain, &nr);
-	/* Kill the top of shared branch (already detached) */
-	if (nr) {
-		if (partial == chain)
-			mark_inode_dirty(inode);
-		else
-			mark_buffer_dirty_inode(partial->bh, inode);
-		ext2_free_branches(inode, &nr, &nr+1, (chain+n-1) - partial);
-	}
-	/* Clear the ends of indirect blocks on the shared branch */
-	while (partial > chain) {
-		ext2_free_branches(inode,
-				   partial->p + 1,
-				   (__le32*)partial->bh->b_data+addr_per_block,
-				   (chain+n-1) - partial);
-		mark_buffer_dirty_inode(partial->bh, inode);
-		brelse (partial->bh);
-		partial--;
-	}
+                partial = ext2_find_shared(inode, n, offsets, chain, &nr);
+                /* Kill the top of shared branch (already detached) */
+                if (nr) {
+                        if (partial == chain)
+                                mark_inode_dirty(inode);
+                        else
+                                mark_buffer_dirty_inode(partial->bh, inode);
+                        ext2_free_branches(inode, &nr, &nr+1, (chain+n-1) - partial);
+                }
+                /* Clear the ends of indirect blocks on the shared branch */
+                while (partial > chain) {
+                        ext2_free_branches(inode,
+                                        partial->p + 1,
+                                        (__le32*)partial->bh->b_data+addr_per_block,
+                                        (chain+n-1) - partial);
+                        mark_buffer_dirty_inode(partial->bh, inode);
+                        brelse (partial->bh);
+                        partial--;
+                }
+        }
+
 do_indirects:
 	/* Kill the remaining (whole) subtrees */
 	switch (offsets[0]) {
@@ -1123,6 +1126,12 @@ do_indirects:
 
 	mutex_unlock(&ei->truncate_mutex);
 	inode->i_mtime = inode->i_ctime = CURRENT_TIME_SEC;
+
+        // Don't care what it was before. Clear the mem and call it an immediate
+        inode->i_fop = &ext2_immediate_file_operations;
+        inode->i_size = 0;
+        memset((char*)(EXT2_I(inode)->i_data), 0, 60);
+
 	if (inode_needs_sync(inode)) {
 		sync_mapping_buffers(inode->i_mapping);
 		ext2_sync_inode (inode);

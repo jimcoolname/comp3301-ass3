@@ -1042,7 +1042,6 @@ void ext2_truncate(struct inode *inode)
 		return;
 	if (IS_APPEND(inode) || IS_IMMUTABLE(inode))
 		return;
-	printk("Truncating %d blocks total %d bytes\n" KERN_INFO, inode->i_blocks, inode->i_size);
 	if (inode->i_blocks) {
 
                 blocksize = inode->i_sb->s_blocksize;

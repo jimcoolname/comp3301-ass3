@@ -270,7 +270,6 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     if (*ppos + len > 59) {
         // Convert to regular file and pass call on to do_encrypted_sync_write
         vfree(newbuf);
-        printk("File reached %d bytes. Converting to regular file\n" KERN_INFO, *ppos + len);
         // Get the data from the buffer
         convert = vmalloc(strlen(writer) + 1);
         memset(convert, 0, strlen(writer) + 1);

@@ -420,16 +420,16 @@ static const match_table_t tokens = {
 	{Opt_usrquota, "usrquota"},
 	{Opt_reservation, "reservation"},
 	{Opt_noreservation, "noreservation"},
-        {Opt_key, "key=%u"},
+        {Opt_key, "key=%s"},
 	{Opt_err, NULL}
 };
 
 static int parse_options (char * options,
 			  struct ext2_sb_info *sbi)
 {
-	char * p;
+	char * p, *stropt;
 	substring_t args[MAX_OPT_ARGS];
-	int option;
+	int option, len;
 
 	if (!options)
 		return 1;
@@ -562,9 +562,15 @@ static int parse_options (char * options,
 			printk("reservations OFF\n");
 			break;
 	        case Opt_key:
-			if (match_int(&args[0], &option))
+	                len = strlen(args[0].from) - strlen(args[0].to) + 1;
+	                stropt = vmalloc(len);
+			if (!match_strlcpy(stropt, &args[0], len)) {
+                                vfree(stropt);
 				return 0;
+                        }
+			sscanf(stropt, "0x%02X", &option);
 			ext3301_enc_key = option & 0xFF;
+			vfree(stropt);
 			break;
 		case Opt_ignore:
 			break;

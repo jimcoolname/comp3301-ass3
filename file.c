@@ -235,14 +235,18 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     int i, errp;
     mm_segment_t old_fs;
     struct dentry *parent, *second_last;
-    char *newbuf = kmalloc(len + 1, GFP_NOFS), *writer, *convert;
+    char *writer, *convert;
+    char *newbuf = vmalloc(len + 1);
     ssize_t retval = 0;
     int encrypting = 0;
     struct inode *inode = filp->f_dentry->d_inode;
 
-    writer = (char*)(EXT2_I(filp->f_dentry->d_inode)->i_data);
+    writer = (char*)(EXT2_I(inode)->i_data);
 
-    if (*ppos + len > 60) {
+    if (ppos == NULL)
+        ppos = &filp->f_pos;
+
+    if (*ppos + len > 59) {
         // Convert to regular file and pass call on to do_encrypted_sync_write
         printk("File reached %d bytes. Converting to regular file\n" KERN_INFO, *ppos + len);
         // Get the data from the buffer
@@ -281,7 +285,7 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
     }
 
     memset(newbuf, 0, len + 1);
-    memcpy(newbuf, buf, len);
+    copy_from_user(newbuf, buf, len);
 
     // If we can't get the name, we can't tell whether it's the /encrypt directory
     // so just pass through
@@ -313,19 +317,16 @@ ssize_t do_immediate_encrypted_sync_write(struct file *filp, const char __user *
         
     }
 
-    printk("Writing \"%s\" to IM File at %d with existing content \"%s\"\n" KERN_INFO, newbuf, *ppos, writer);
     // Switch to kernel space before trying to write. Avoids EFAULT
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
     memcpy(&writer[(int)*ppos], newbuf, len);
-    set_fs(old_fs);
+    writer[((int)*ppos) + len] = 0;
     *ppos += len;
     filp->f_pos = *ppos;
     inode->i_size = *ppos;
 
-    mark_inode_dirty(inode);
+    ext2_write_inode(inode, 1);
 
-    kfree(newbuf);
+    vfree(newbuf);
 
     return len;
 }
